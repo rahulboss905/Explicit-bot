@@ -1,3 +1,4 @@
+# app.py
 import os
 import logging
 import re
@@ -20,20 +21,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Enhanced NSFW detection patterns
+# Enhanced NSFW detection patterns with fixed-width constraints
 NSFW_PATTERNS = [
-    # Explicit terms with context avoidance
+    # Explicit terms
     r'\b(?:nude|naked|bare\s?skin|exposed\s?genitalia)\b',
     r'\b(?:sexual|sex|porn|xxx|nsfw|adult\s?content)\b',
-    r'\b(?:fuck(?:ing)?|fck|f\*\*k|shag(?:ging)?|intercourse)\b(?<!\bfighting)',
+    r'\b(?:fuck(?:ing)?|fck|f\*\*k|shag(?:ging)?|intercourse)\b',
     r'\b(?:blow\s?job|hand\s?job|bj|hj)\b',
     r'\b(?:cum(?:ming|shot)?|sperm|jizz|creampie)\b',
     
-    # Anatomy terms with medical context avoidance
-    r'\b(?:penis|dick|cock|schlong|member|phallus)\b(?<!\bpenis\s?envy)',
+    # Anatomy terms
+    r'\b(?:penis|dick|cock|schlong|member|phallus)\b',
     r'\b(?:vagina|pussy|cunt|clit|labia|vulva)\b',
-    r'\b(?:breasts|boobs|tits|titties|rack|knockers)\b(?<!\bchicken\s?breasts)',
-    r'\b(?:ass(?:hole)?|arse(?:hole)?|butt\s?hole)\b(?<!\bdumb\s?ass)',
+    r'\b(?:boobs|tits|titties|rack|knockers)\b',  # Removed "breasts" to avoid false positives
+    r'\b(?:asshole|arsehole|butthole)\b',  # More explicit terms only
     
     # Fetish/BDSM terms
     r'\b(?:bdsm|sadomaso|s\s?&\s?m|dominatrix|submissive)\b',
@@ -57,12 +58,39 @@ NSFW_PATTERNS = [
 # Compile patterns into single regex
 NSFW_REGEX = re.compile('|'.join(NSFW_PATTERNS), re.IGNORECASE | re.UNICODE)
 
+# Safe context phrases to ignore
+SAFE_CONTEXTS = [
+    'chicken breasts',
+    'dumb ass',
+    'smart ass',
+    'bad ass',
+    'kick ass',
+    'penis envy',
+    'fighting spirit',
+    'breast cancer',
+    'breast feeding',
+    'breast milk'
+]
+
 # Create Flask app
 flask_app = Flask(__name__)
 
 def contains_nsfw_content(text: str) -> bool:
-    """Detect NSFW content using advanced regex patterns"""
-    return bool(NSFW_REGEX.search(text)) if text else False
+    """Detect NSFW content with safe context checks"""
+    if not text:
+        return False
+        
+    # Normalize text for safe context checking
+    text_lower = text.lower()
+    
+    # First check for safe contexts
+    for phrase in SAFE_CONTEXTS:
+        if phrase in text_lower:
+            logger.info(f"Safe context detected: {phrase}")
+            return False
+            
+    # Then check for NSFW patterns
+    return bool(NSFW_REGEX.search(text_lower))
 
 async def is_nsfw_image(image_url: str) -> bool:
     """
@@ -194,7 +222,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔧 *Configuration:*\n"
         "• `SIGHTENGINE_USER` & `SIGHTENGINE_SECRET` for image scanning\n\n"
         "⚙️ _Current capabilities:_\n"
-        f"- Text filtering: {'✅' if NSFW_REGEX else '❌'}\n"
+        f"- Text filtering: ✅\n"
         f"- Image scanning: {'✅' if os.environ.get('SIGHTENGINE_USER') else '❌'}",
         parse_mode="MarkdownV2"
     )
