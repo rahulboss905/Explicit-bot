@@ -1,0 +1,18 @@
+# render.yaml
+services:
+  - type: web
+    name: telegram-group-protector
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app --workers=1 --threads=4 --worker-class=gevent --timeout 120
+    envVars:
+      - key: BOT_TOKEN
+        description: Telegram bot token from @BotFather
+      - key: WEBHOOK_URL
+        description: Full URL of your Render service (e.g., https://your-service.onrender.com)
+      - key: SIGHTENGINE_USER
+        required: false
+        description: Sightengine API user from https://dashboard.sightengine.com/
+      - key: SIGHTENGINE_SECRET
+        required: false
+        description: Sightengine API secret

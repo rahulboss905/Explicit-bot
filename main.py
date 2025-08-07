@@ -1,0 +1,241 @@
+# main.py
+import os
+import logging
+import re
+import time
+import requests
+from telegram import Update, ChatPermissions
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes
+)
+from flask import Flask, request, jsonify
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Enhanced NSFW detection patterns
+NSFW_PATTERNS = [
+    # Explicit terms with context avoidance
+    r'\b(?:nude|naked|bare\s?skin|exposed\s?genitalia)\b',
+    r'\b(?:sexual|sex|porn|xxx|nsfw|adult\s?content)\b',
+    r'\b(?:fuck(?:ing)?|fck|f\*\*k|shag(?:ging)?|intercourse)\b(?<!\bfighting)',
+    r'\b(?:blow\s?job|hand\s?job|bj|hj)\b',
+    r'\b(?:cum(?:ming|shot)?|sperm|jizz|creampie)\b',
+    
+    # Anatomy terms with medical context avoidance
+    r'\b(?:penis|dick|cock|schlong|member|phallus)\b(?<!\bpenis\s?envy)',
+    r'\b(?:vagina|pussy|cunt|clit|labia|vulva)\b',
+    r'\b(?:breasts|boobs|tits|titties|rack|knockers)\b(?<!\bchicken\s?breasts)',
+    r'\b(?:ass(?:hole)?|arse(?:hole)?|butt\s?hole)\b(?<!\bdumb\s?ass)',
+    
+    # Fetish/BDSM terms
+    r'\b(?:bdsm|sadomaso|s\s?&\s?m|dominatrix|submissive)\b',
+    r'\b(?:fetish|kink|bondage|spanking|whipping)\b',
+    
+    # Illegal/exploitative content
+    r'\b(?:child\s?porn|kiddy\s?porn|cp|lolita|shota)\b',
+    r'\b(?:rape|molest|incest|pedo|beastiality)\b',
+    
+    # Evasive spellings and leetspeak
+    r'\b(?:pr0n|p0rn|nud3|s3x|f\*\*k|f\*ck|f\*\*\*)\b',
+    r'\b(?:s\*\*t|a\*\*|a\*\*hole|b\*\*bs)\b',
+    
+    # NSFW URLs
+    r'\b(?:porn|xxx|adult|nude|sex)[^\s]*\.(?:com|net|xyz|ru|site|to)\b',
+    
+    # Sexual emojis
+    r'[🍆🌮🍑💦👅🔞🥵😈]'
+]
+
+# Compile patterns into single regex
+NSFW_REGEX = re.compile('|'.join(NSFW_PATTERNS), re.IGNORECASE | re.UNICODE)
+
+app = Flask(__name__)
+
+def contains_nsfw_content(text: str) -> bool:
+    """Detect NSFW content using advanced regex patterns"""
+    return bool(NSFW_REGEX.search(text)) if text else False
+
+async def is_nsfw_image(image_url: str) -> bool:
+    """
+    Check if image is NSFW using Sightengine's free API (2000 free checks/month)
+    Requires SIGHTENGINE_USER and SIGHTENGINE_SECRET environment variables
+    """
+    try:
+        user = os.environ.get('SIGHTENGINE_USER')
+        secret = os.environ.get('SIGHTENGINE_SECRET')
+        
+        if not user or not secret:
+            logger.warning("Sightengine credentials not set. Image check skipped.")
+            return False
+            
+        response = requests.post(
+            'https://api.sightengine.com/1.0/check.json',
+            data={
+                'url': image_url,
+                'models': 'nudity-2.0,wad,offensive,text-content',
+                'api_user': user,
+                'api_secret': secret
+            },
+            timeout=10
+        )
+        data = response.json()
+        
+        # Evaluate results
+        nsfw_score = data.get('nudity', {}).get('sexual_activity', 0)
+        nsfw_score += data.get('nudity', {}).get('sexual_display', 0)
+        offensive_score = data.get('offensive', {}).get('prob', 0)
+        
+        # Thresholds can be adjusted (0.7 = 70% confidence)
+        if nsfw_score > 0.7 or offensive_score > 0.7:
+            logger.info(f"NSFW image detected: {nsfw_score=}, {offensive_score=}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Image detection error: {e}")
+    return False
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process incoming messages and check for NSFW content"""
+    message = update.message
+    if not message or not message.chat or message.chat.type not in ("group", "supergroup"):
+        return
+
+    user = message.from_user
+    content_deleted = False
+    nsfw_detected = False
+
+    try:
+        # Check text content
+        text_content = ""
+        if message.text:
+            text_content = message.text
+        elif message.caption:
+            text_content = message.caption
+            
+        if text_content and contains_nsfw_content(text_content):
+            nsfw_detected = True
+
+        # Check images
+        elif message.photo:
+            # Use the highest quality photo
+            photo = message.photo[-1]
+            file = await photo.get_file()
+            if await is_nsfw_image(file.file_path):
+                nsfw_detected = True
+
+        # Check stickers
+        elif message.sticker:
+            sticker_text = ""
+            if message.sticker.emoji:
+                sticker_text += message.sticker.emoji + " "
+            if message.sticker.set_name:
+                sticker_text += message.sticker.set_name
+                
+            if contains_nsfw_content(sticker_text):
+                nsfw_detected = True
+
+        # Take action if NSFW detected
+        if nsfw_detected:
+            # Delete the offending message
+            await message.delete()
+            content_deleted = True
+
+            # Mute user for 5 minutes
+            until_date = int(time.time()) + 300  # 5 minutes
+            await context.bot.restrict_chat_member(
+                chat_id=message.chat.id,
+                user_id=user.id,
+                permissions=ChatPermissions(
+                    can_send_messages=False,
+                    can_send_media_messages=False,
+                    can_send_other_messages=False,
+                    can_add_web_page_previews=False
+                ),
+                until_date=until_date
+            )
+
+            # Send warning to group
+            warning_msg = (
+                f"⚠️ NSFW content detected from {user.mention_markdown_v2()}!\n"
+                f"_Content deleted and user muted for 5 minutes_"
+            )
+            await message.chat.send_message(
+                text=warning_msg,
+                parse_mode="MarkdownV2"
+            )
+
+            # Log action
+            logger.info(f"Deleted NSFW content from {user.id} in {message.chat.id}")
+
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        if not content_deleted and nsfw_detected:
+            try:
+                await message.delete()
+            except:
+                pass
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
+    await update.message.reply_text(
+        "🛡️ *Group Shield Bot Activated!*\n\n"
+        "I will automatically protect your group from:\n"
+        "• Explicit images/videos\n• NSFW text\n• Adult stickers\n\n"
+        "_Add me to your group as admin with delete and ban permissions._\n\n"
+        "🔧 *Configuration:*\n"
+        "• `ENABLE_IMAGE_DETECTION=true/false`\n"
+        "• `SIGHTENGINE_USER` & `SIGHTENGINE_SECRET` for image scanning\n\n"
+        "⚙️ _Current capabilities:_\n"
+        f"- Text filtering: {'✅' if NSFW_REGEX else '❌'}\n"
+        f"- Image scanning: {'✅' if os.environ.get('SIGHTENGINE_USER') else '❌'}",
+        parse_mode="MarkdownV2"
+    )
+
+@app.route('/')
+def health_check():
+    """Health check endpoint for Render"""
+    return jsonify({"status": "ok", "service": "telegram-group-protector"})
+
+@app.route('/webhook', methods=['POST'])
+async def webhook():
+    """Webhook endpoint for Telegram"""
+    application = context.application
+    update = Update.de_json(await request.get_json(), application.bot)
+    await application.process_update(update)
+    return jsonify({"status": "success"})
+
+async def setup_webhook():
+    """Configure Telegram webhook"""
+    webhook_url = os.environ['WEBHOOK_URL'] + '/webhook'
+    await application.bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set to: {webhook_url}")
+
+if __name__ == '__main__':
+    # Initialize Telegram application
+    token = os.environ['BOT_TOKEN']
+    application = Application.builder().token(token).build()
+
+    # Register handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.ALL, handle_message))
+
+    # Setup webhook when running in production
+    if 'RENDER' in os.environ:
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=int(os.environ.get('PORT', 5000)),
+            webhook_url=os.environ['WEBHOOK_URL'] + '/webhook',
+            secret_token=os.environ.get('WEBHOOK_SECRET', '')
+        )
+    else:
+        # Running locally with polling
+        application.run_polling()
