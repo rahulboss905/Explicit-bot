@@ -33,8 +33,8 @@ NSFW_PATTERNS = [
     # Anatomy terms
     r'\b(?:penis|dick|cock|schlong|member|phallus)\b',
     r'\b(?:vagina|pussy|cunt|clit|labia|vulva)\b',
-    r'\b(?:boobs|tits|titties|rack|knockers)\b',  # Removed "breasts" to avoid false positives
-    r'\b(?:asshole|arsehole|butthole)\b',  # More explicit terms only
+    r'\b(?:boobs|tits|titties|rack|knockers)\b',
+    r'\b(?:asshole|arsehole|butthole)\b',
     
     # Fetish/BDSM terms
     r'\b(?:bdsm|sadomaso|s\s?&\s?m|dominatrix|submissive)\b',
@@ -223,9 +223,46 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `SIGHTENGINE_USER` & `SIGHTENGINE_SECRET` for image scanning\n\n"
         "⚙️ _Current capabilities:_\n"
         f"- Text filtering: ✅\n"
-        f"- Image scanning: {'✅' if os.environ.get('SIGHTENGINE_USER') else '❌'}",
+        f"- Image scanning: {'✅' if os.environ.get('SIGHTENGINE_USER') else '❌'}\n\n"
+        "Use /help for bot commands and usage",
         parse_mode="MarkdownV2"
     )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    help_text = (
+        "🤖 *Group Shield Bot Help*\n\n"
+        "I automatically moderate your group by:\n"
+        "1. Detecting and deleting NSFW content\n"
+        "2. Temporarily muting offenders (5 min)\n"
+        "3. Sending warnings to the group\n\n"
+        "🔒 *Required Admin Permissions:*\n"
+        "- Delete messages\n"
+        "- Ban users\n"
+        "- Invite users via link\n\n"
+        "⚙️ *Bot Commands:*\n"
+        "/start - Check bot status\n"
+        "/help - Show this help message\n"
+        "/settings - Configure bot parameters (coming soon)\n\n"
+        "🔍 *Detection Capabilities:*\n"
+        "- Text messages with explicit content\n"
+        "- Images with nudity/sexual content\n"
+        "- Stickers with NSFW emojis or pack names\n\n"
+        "⚠️ _Note: Image detection requires Sightengine API credentials_"
+    )
+    await update.message.reply_text(help_text, parse_mode="MarkdownV2")
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /settings command"""
+    settings_text = (
+        "⚙️ *Bot Settings*\n\n"
+        "Current configuration:\n"
+        f"- Image scanning: {'✅ Enabled' if os.environ.get('SIGHTENGINE_USER') else '❌ Disabled'}\n"
+        f"- Text filtering: ✅ Always active\n"
+        f"- Mute duration: 5 minutes\n\n"
+        "_Advanced configuration coming soon. For now, settings are managed via environment variables._"
+    )
+    await update.message.reply_text(settings_text, parse_mode="MarkdownV2")
 
 @flask_app.route('/')
 def health_check():
@@ -251,6 +288,8 @@ def main():
 
     # Register handlers
     telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(CommandHandler("help", help_command))
+    telegram_app.add_handler(CommandHandler("settings", settings_command))
     telegram_app.add_handler(MessageHandler(filters.ALL, handle_message))
 
     # Setup webhook when running in production
@@ -265,6 +304,7 @@ def main():
         logger.info(f"Webhook configured at: {webhook_url}")
     else:
         # Running locally with polling
+        logger.info("Starting bot in polling mode...")
         telegram_app.run_polling()
 
 if __name__ == '__main__':
