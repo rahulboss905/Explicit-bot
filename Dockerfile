@@ -15,5 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY . .
 
+# Use PORT environment variable with default fallback
+ENV PORT=${PORT:-5000}
+
 # Start command
-CMD ["gunicorn", "app:flask_app", "--workers=1", "--threads=4", "--worker-class=gevent", "--timeout", "120", "--bind", "0.0.0.0:$PORT"]
+CMD gunicorn app:flask_app --workers=1 --threads=4 --worker-class=gevent --timeout 120 --bind 0.0.0.0:$PORT
