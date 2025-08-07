@@ -76,6 +76,9 @@ SAFE_CONTEXTS = [
 # Create Flask app
 flask_app = Flask(__name__)
 
+# Global bot application reference
+telegram_app = None
+
 def contains_nsfw_content(text: str) -> bool:
     """Detect NSFW content with safe context checks"""
     if not text:
@@ -287,6 +290,9 @@ def webhook():
     """Webhook endpoint for Telegram"""
     if request.method == "POST":
         try:
+            if not telegram_app:
+                return jsonify({"status": "error", "message": "Bot not initialized"}), 500
+                
             json_data = request.json
             update = Update.de_json(json_data, telegram_app.bot)
             telegram_app.update_queue.put(update)
@@ -306,17 +312,17 @@ def setup_bot():
         return None
 
     try:
-        telegram_app = Application.builder().token(token).build()
+        application = Application.builder().token(token).build()
         
         # Register handlers
-        telegram_app.add_handler(CommandHandler("start", start))
-        telegram_app.add_handler(CommandHandler("help", help_command))
-        telegram_app.add_handler(CommandHandler("test", test_command))
-        telegram_app.add_handler(CommandHandler("ping", ping_command))
-        telegram_app.add_handler(MessageHandler(filters.ALL, handle_message))
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("test", test_command))
+        application.add_handler(CommandHandler("ping", ping_command))
+        application.add_handler(MessageHandler(filters.ALL, handle_message))
         
         logger.info("Telegram bot setup complete")
-        return telegram_app
+        return application
     except Exception as e:
         logger.error(f"Bot setup failed: {e}")
         return None
