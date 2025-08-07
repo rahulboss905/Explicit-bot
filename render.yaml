@@ -1,18 +1,13 @@
 services:
   - type: web
     name: telegram-group-protector
-    env: python
-    buildCommand: |
-      pip install -U pip setuptools wheel
-      pip install -r requirements.txt
+    dockerfilePath: Dockerfile
     envVars:
       - key: BOT_TOKEN
-        description: Telegram bot token from @BotFather
+        description: Telegram bot token
       - key: WEBHOOK_URL
-        description: Full URL of your Render service
+        description: Your Render service URL
       - key: SIGHTENGINE_USER
         required: false
-        description: Sightengine API user
       - key: SIGHTENGINE_SECRET
         required: false
-        description: Sightengine API secret
