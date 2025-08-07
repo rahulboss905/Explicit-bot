@@ -3,6 +3,7 @@ services:
     name: telegram-group-protector
     env: python
     buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:flask_app --workers=1 --threads=1 --worker-class=sync --timeout 120 --bind 0.0.0.0:$PORT
     envVars:
       - key: BOT_TOKEN
         description: Telegram bot token from @BotFather
