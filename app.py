@@ -4,6 +4,7 @@ import logging
 import re
 import time
 import requests
+import asyncio
 from telegram import Update, ChatPermissions
 from telegram.ext import (
     Application,
@@ -151,14 +152,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         if text_content and contains_nsfw_content(text_content):
             nsfw_detected = True
+            logger.info(f"NSFW text detected: {text_content[:50]}...")
 
         # Check images
         elif message.photo:
             # Use the highest quality photo
             photo = message.photo[-1]
             file = await photo.get_file()
+            logger.info(f"Processing image: {file.file_id}")
             if await is_nsfw_image(file.file_path):
                 nsfw_detected = True
+                logger.info("NSFW image confirmed")
 
         # Check stickers
         elif message.sticker:
@@ -168,14 +172,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if message.sticker.set_name:
                 sticker_text += message.sticker.set_name
                 
-            if contains_nsfw_content(sticker_text):
+            if sticker_text and contains_nsfw_content(sticker_text):
                 nsfw_detected = True
+                logger.info(f"NSFW sticker detected: {sticker_text}")
 
         # Take action if NSFW detected
         if nsfw_detected:
             # Delete the offending message
             await message.delete()
             content_deleted = True
+            logger.info(f"Deleted message from {user.id}")
 
             # Mute user for 5 minutes
             until_date = int(time.time()) + 300  # 5 minutes
@@ -190,6 +196,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ),
                 until_date=until_date
             )
+            logger.info(f"Muted user {user.id} for 5 minutes")
 
             # Send warning to group
             warning_msg = (
@@ -200,50 +207,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text=warning_msg,
                 parse_mode="MarkdownV2"
             )
-
-            # Log action
-            logger.info(f"Deleted NSFW content from {user.id} in {message.chat.id}")
+            logger.info("Sent warning to group")
 
     except Exception as e:
         logger.error(f"Error processing message: {e}")
         if not content_deleted and nsfw_detected:
             try:
                 await message.delete()
-            except:
-                pass
+                logger.info("Deleted message in fallback")
+            except Exception as e2:
+                logger.error(f"Fallback delete failed: {e2}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command"""
+    logger.info(f"Start command from {update.effective_user.id}")
     await update.message.reply_text(
         "🛡️ *Group Shield Bot Activated!*\n\n"
         "I will automatically protect your group from:\n"
         "• Explicit images/videos\n• NSFW text\n• Adult stickers\n\n"
         "_Add me to your group as admin with delete and ban permissions._\n\n"
-        "🔧 *Configuration:*\n"
-        "• `SIGHTENGINE_USER` & `SIGHTENGINE_SECRET` for image scanning\n\n"
-        "⚙️ _Current capabilities:_\n"
-        f"- Text filtering: ✅\n"
-        f"- Image scanning: {'✅' if os.environ.get('SIGHTENGINE_USER') else '❌'}\n\n"
+        "🔧 *Configuration Status:*\n"
+        f"- Text filtering: ✅ Enabled\n"
+        f"- Image scanning: {'✅ Enabled' if os.environ.get('SIGHTENGINE_USER') else '❌ Disabled'}\n\n"
         "Use /help for bot commands and usage",
         parse_mode="MarkdownV2"
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
+    logger.info(f"Help command from {update.effective_user.id}")
     help_text = (
         "🤖 *Group Shield Bot Help*\n\n"
-        "I automatically moderate your group by:\n"
-        "1. Detecting and deleting NSFW content\n"
-        "2. Temporarily muting offenders (5 min)\n"
-        "3. Sending warnings to the group\n\n"
-        "🔒 *Required Admin Permissions:*\n"
+        "🔒 *My Purpose:*\n"
+        "I automatically protect groups by detecting and removing adult content.\n\n"
+        "⚡ *What I Do:*\n"
+        "- Delete NSFW images/videos/stickers/text\n"
+        "- Mute offenders for 5 minutes\n"
+        "- Send warnings to the group\n\n"
+        "🔑 *Required Permissions:*\n"
+        "To work properly, I need these admin permissions:\n"
         "- Delete messages\n"
         "- Ban users\n"
         "- Invite users via link\n\n"
-        "⚙️ *Bot Commands:*\n"
+        "💡 *Commands:*\n"
         "/start - Check bot status\n"
         "/help - Show this help message\n"
-        "/settings - Configure bot parameters (coming soon)\n\n"
+        "/test - Test if bot is responding\n"
+        "/ping - Simple health check\n\n"
         "🔍 *Detection Capabilities:*\n"
         "- Text messages with explicit content\n"
         "- Images with nudity/sexual content\n"
@@ -252,56 +262,101 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text, parse_mode="MarkdownV2")
 
-async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /settings command"""
-    settings_text = (
-        "⚙️ *Bot Settings*\n\n"
-        "Current configuration:\n"
-        f"- Image scanning: {'✅ Enabled' if os.environ.get('SIGHTENGINE_USER') else '❌ Disabled'}\n"
-        f"- Text filtering: ✅ Always active\n"
-        f"- Mute duration: 5 minutes\n\n"
-        "_Advanced configuration coming soon. For now, settings are managed via environment variables._"
-    )
-    await update.message.reply_text(settings_text, parse_mode="MarkdownV2")
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /test command"""
+    logger.info(f"Test command from {update.effective_user.id}")
+    await update.message.reply_text("✅ Bot is active and responding!")
+
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ping command"""
+    logger.info(f"Ping command from {update.effective_user.id}")
+    await update.message.reply_text("🏓 Pong!")
 
 @flask_app.route('/')
 def health_check():
     """Health check endpoint for Render"""
-    return jsonify({"status": "ok", "service": "telegram-group-protector"})
+    return jsonify({
+        "status": "ok",
+        "service": "telegram-group-protector",
+        "version": "2.0",
+        "bot_status": "running" if telegram_app else "not initialized"
+    })
 
 @flask_app.route('/webhook', methods=['POST'])
 def webhook():
     """Webhook endpoint for Telegram"""
     if request.method == "POST":
-        # Process Telegram update
-        json_data = request.json
-        update = Update.de_json(json_data, telegram_app.bot)
-        telegram_app.update_queue.put(update)
-    return jsonify({"status": "success"})
+        try:
+            json_data = request.json
+            update = Update.de_json(json_data, telegram_app.bot)
+            telegram_app.update_queue.put(update)
+            logger.info("Received update via webhook")
+            return jsonify({"status": "success"})
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+    return jsonify({"status": "error", "message": "Method not allowed"}), 405
+
+def setup_bot():
+    """Initialize Telegram application"""
+    global telegram_app
+    token = os.environ.get('BOT_TOKEN')
+    if not token:
+        logger.error("BOT_TOKEN environment variable is not set!")
+        return None
+
+    try:
+        telegram_app = Application.builder().token(token).build()
+        
+        # Register handlers
+        telegram_app.add_handler(CommandHandler("start", start))
+        telegram_app.add_handler(CommandHandler("help", help_command))
+        telegram_app.add_handler(CommandHandler("test", test_command))
+        telegram_app.add_handler(CommandHandler("ping", ping_command))
+        telegram_app.add_handler(MessageHandler(filters.ALL, handle_message))
+        
+        logger.info("Telegram bot setup complete")
+        return telegram_app
+    except Exception as e:
+        logger.error(f"Bot setup failed: {e}")
+        return None
 
 def main():
     """Main application setup"""
-    # Initialize Telegram application
-    token = os.environ['BOT_TOKEN']
     global telegram_app
-    telegram_app = Application.builder().token(token).build()
-
-    # Register handlers
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("help", help_command))
-    telegram_app.add_handler(CommandHandler("settings", settings_command))
-    telegram_app.add_handler(MessageHandler(filters.ALL, handle_message))
+    
+    # Initialize bot
+    telegram_app = setup_bot()
+    if not telegram_app:
+        logger.error("Failed to initialize bot. Exiting.")
+        return
 
     # Setup webhook when running in production
     if 'RENDER' in os.environ:
-        webhook_url = os.environ['WEBHOOK_URL'] + '/webhook'
-        telegram_app.run_webhook(
-            listen="0.0.0.0",
-            port=int(os.environ.get('PORT', 5000)),
-            webhook_url=webhook_url,
-            secret_token=os.environ.get('WEBHOOK_SECRET', '')
-        )
-        logger.info(f"Webhook configured at: {webhook_url}")
+        webhook_url = os.environ.get('WEBHOOK_URL', '') + '/webhook'
+        secret_token = os.environ.get('WEBHOOK_SECRET', '')
+        port = int(os.environ.get('PORT', 5000))
+        
+        if not webhook_url.startswith('http'):
+            logger.error(f"Invalid WEBHOOK_URL: {webhook_url}")
+            return
+            
+        try:
+            # Set webhook asynchronously
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(
+                telegram_app.bot.set_webhook(
+                    webhook_url,
+                    secret_token=secret_token
+                )
+            )
+            logger.info(f"Webhook configured at: {webhook_url}")
+            
+            # Start web server
+            logger.info(f"Starting Flask app on port {port}")
+            flask_app.run(host='0.0.0.0', port=port)
+        except Exception as e:
+            logger.error(f"Webhook setup failed: {e}")
     else:
         # Running locally with polling
         logger.info("Starting bot in polling mode...")
