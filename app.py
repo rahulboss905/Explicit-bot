@@ -1,4 +1,3 @@
-# app.py
 import os
 import logging
 import re
@@ -206,13 +205,13 @@ def health_check():
     return jsonify({"status": "ok", "service": "telegram-group-protector"})
 
 @flask_app.route('/webhook', methods=['POST'])
-async def webhook():
+def webhook():
     """Webhook endpoint for Telegram"""
     if request.method == "POST":
         # Process Telegram update
-        application = telegram_app
-        update = Update.de_json(await request.get_json(), application.bot)
-        await application.process_update(update)
+        json_data = request.json
+        update = Update.de_json(json_data, telegram_app.bot)
+        telegram_app.update_queue.put(update)
     return jsonify({"status": "success"})
 
 def main():
@@ -233,12 +232,7 @@ def main():
             listen="0.0.0.0",
             port=int(os.environ.get('PORT', 5000)),
             webhook_url=webhook_url,
-            secret_token=os.environ.get('WEBHOOK_SECRET', ''),
-            ssl_context=None,
-            key=None,
-            cert=None,
-            bootstrap_retries=0,
-            webhook_settings=None,
+            secret_token=os.environ.get('WEBHOOK_SECRET', '')
         )
         logger.info(f"Webhook configured at: {webhook_url}")
     else:
@@ -246,4 +240,4 @@ def main():
         telegram_app.run_polling()
 
 if __name__ == '__main__':
-    main()        application.run_polling()
+    main()
