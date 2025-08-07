@@ -1,4 +1,4 @@
-# main.py
+# app.py
 import os
 import logging
 import re
@@ -58,7 +58,8 @@ NSFW_PATTERNS = [
 # Compile patterns into single regex
 NSFW_REGEX = re.compile('|'.join(NSFW_PATTERNS), re.IGNORECASE | re.UNICODE)
 
-app = Flask(__name__)
+# Create Flask app
+flask_app = Flask(__name__)
 
 def contains_nsfw_content(text: str) -> bool:
     """Detect NSFW content using advanced regex patterns"""
@@ -192,7 +193,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Explicit images/videos\n• NSFW text\n• Adult stickers\n\n"
         "_Add me to your group as admin with delete and ban permissions._\n\n"
         "🔧 *Configuration:*\n"
-        "• `ENABLE_IMAGE_DETECTION=true/false`\n"
         "• `SIGHTENGINE_USER` & `SIGHTENGINE_SECRET` for image scanning\n\n"
         "⚙️ _Current capabilities:_\n"
         f"- Text filtering: {'✅' if NSFW_REGEX else '❌'}\n"
@@ -200,42 +200,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="MarkdownV2"
     )
 
-@app.route('/')
+@flask_app.route('/')
 def health_check():
     """Health check endpoint for Render"""
     return jsonify({"status": "ok", "service": "telegram-group-protector"})
 
-@app.route('/webhook', methods=['POST'])
+@flask_app.route('/webhook', methods=['POST'])
 async def webhook():
     """Webhook endpoint for Telegram"""
-    application = context.application
-    update = Update.de_json(await request.get_json(), application.bot)
-    await application.process_update(update)
+    if request.method == "POST":
+        # Process Telegram update
+        application = telegram_app
+        update = Update.de_json(await request.get_json(), application.bot)
+        await application.process_update(update)
     return jsonify({"status": "success"})
 
-async def setup_webhook():
-    """Configure Telegram webhook"""
-    webhook_url = os.environ['WEBHOOK_URL'] + '/webhook'
-    await application.bot.set_webhook(webhook_url)
-    logger.info(f"Webhook set to: {webhook_url}")
-
-if __name__ == '__main__':
+def main():
+    """Main application setup"""
     # Initialize Telegram application
     token = os.environ['BOT_TOKEN']
-    application = Application.builder().token(token).build()
+    global telegram_app
+    telegram_app = Application.builder().token(token).build()
 
     # Register handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.ALL, handle_message))
+    telegram_app.add_handler(CommandHandler("start", start))
+    telegram_app.add_handler(MessageHandler(filters.ALL, handle_message))
 
     # Setup webhook when running in production
     if 'RENDER' in os.environ:
-        application.run_webhook(
+        webhook_url = os.environ['WEBHOOK_URL'] + '/webhook'
+        telegram_app.run_webhook(
             listen="0.0.0.0",
             port=int(os.environ.get('PORT', 5000)),
-            webhook_url=os.environ['WEBHOOK_URL'] + '/webhook',
-            secret_token=os.environ.get('WEBHOOK_SECRET', '')
+            webhook_url=webhook_url,
+            secret_token=os.environ.get('WEBHOOK_SECRET', ''),
+            ssl_context=None,
+            key=None,
+            cert=None,
+            bootstrap_retries=0,
+            webhook_settings=None,
         )
+        logger.info(f"Webhook configured at: {webhook_url}")
     else:
         # Running locally with polling
-        application.run_polling()
+        telegram_app.run_polling()
+
+if __name__ == '__main__':
+    main()        application.run_polling()
